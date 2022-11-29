@@ -34,6 +34,8 @@ import sogclr.loader
 import sogclr.optimizer
 import sogclr.cifar  # cifar
 
+import torch_optimizer
+
 # ignore all warnings
 import warnings
 warnings.filterwarnings("ignore")
@@ -96,7 +98,7 @@ parser.add_argument('--stop-grad-conv1', action='store_true',
 
 # other upgrades
 parser.add_argument('--optimizer', default='lars', type=str,
-                    choices=['lars', 'adamw'],
+                    choices=['lars', 'adamw', 'adafactor'],
                     help='optimizer used (default: lars)')
 parser.add_argument('--warmup-epochs', default=10, type=int, metavar='N',
                     help='number of warmup epochs')
@@ -118,7 +120,7 @@ parser.add_argument('--learning-rate-scaling', default='linear', type=str,
                     choices=['sqrt', 'linear'],
                     help='learing rate scaling (default: linear)')
 
-# wandb
+# others
 parser.add_argument('--wandb', default=1, type=int,
                     help='if log to wandb')
 
@@ -186,6 +188,9 @@ def main_worker(gpu, ngpus_per_node, args):
                                         momentum=args.momentum)
     elif args.optimizer == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), args.lr,
+                                weight_decay=args.weight_decay)
+    elif args.optimizer == 'adafactor':
+        optimizer = torch_optimizer.Adafactor(model.parameters(), args.lr,
                                 weight_decay=args.weight_decay)
         
     scaler = torch.cuda.amp.GradScaler()
