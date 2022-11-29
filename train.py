@@ -123,6 +123,8 @@ parser.add_argument('--learning-rate-scaling', default='linear', type=str,
 # others
 parser.add_argument('--wandb', default=1, type=int,
                     help='if log to wandb')
+parser.add_argument('--accloss', default=1, type=int,
+                    help='accumulate loss')
 
 def main():
     args = parser.parse_args()
@@ -240,10 +242,14 @@ def main_worker(gpu, ngpus_per_node, args):
     augmentation1 = [
         transforms.RandomResizedCrop(image_size, scale=(args.crop_min, 1.)),
         transforms.RandomApply([
-            transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
+            transforms.ColorJitter(0.4, 0.4, 0.2, 0.1),  # not strengthened
+            # transforms.RandomRotation([-8,+8]),
+            # transforms.ElasticTransform(alpha=250.0),
+            # transforms.RandomPerspective(distortion_scale = 0.6, p=1.0),
         ], p=0.8),
         transforms.RandomGrayscale(p=0.2),
-        transforms.RandomHorizontalFlip(),
+        # transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.ToTensor(),
         normalize
     ]
@@ -318,12 +324,13 @@ def train(train_loader, model, optimizer, scaler, summary_writer, epoch, args):
         losses.update(loss.item(), images[0].size(0))
 
         summary_writer.add_scalar("loss", loss.item(), epoch * iters_per_epoch + i)
-
+        loss *= 1./ args.accloss
         # compute gradient and do SGD step
         optimizer.zero_grad()
         scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+        if i % args.accloss == 0:
+            scaler.step(optimizer)
+            scaler.update()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
