@@ -304,6 +304,8 @@ def train(train_loader, model, optimizer, scaler, summary_writer, epoch, args):
 
     end = time.time()
     iters_per_epoch = len(train_loader)
+    
+    loss_list = []
 
     for i, (images, _, index) in enumerate(train_loader):
         # measure data loading time
@@ -324,13 +326,16 @@ def train(train_loader, model, optimizer, scaler, summary_writer, epoch, args):
         losses.update(loss.item(), images[0].size(0))
 
         summary_writer.add_scalar("loss", loss.item(), epoch * iters_per_epoch + i)
-        loss *= 1./ args.accloss
+        # loss *= 1./ args.accloss
+        loss_list.append(loss)
         # compute gradient and do SGD step
-        optimizer.zero_grad()
-        scaler.scale(loss).backward()
         if i % args.accloss == 0:
+            loss = max(loss_list)
+            optimizer.zero_grad()
+            scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
+            loss_list = []
 
         # measure elapsed time
         batch_time.update(time.time() - end)
