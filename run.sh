@@ -1,6 +1,6 @@
 python train.py \
-  --lr=1.0 --learning-rate-scaling=sqrt \
-  --epochs=40 --batch-size=64 \
+  --lr=1.0 --learning-rate-scaling=linear \
+  --epochs=400 --batch-size=64 \
   --loss_type dcl \
   --gamma 0.9 \
   --workers 32 \

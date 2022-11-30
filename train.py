@@ -248,7 +248,7 @@ def main_worker(gpu, ngpus_per_node, args):
             # transforms.RandomPerspective(distortion_scale = 0.6, p=1.0),
         ], p=0.8),
         transforms.RandomGrayscale(p=0.2),
-        # transforms.RandomHorizontalFlip(),
+        transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
         transforms.ToTensor(),
         normalize

@@ -7,7 +7,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import numpy as np
 
 class SimCLR(nn.Module):
     """
@@ -113,6 +113,9 @@ class SimCLR(nn.Module):
 
         loss_a = softmax_cross_entropy_with_logits(labels, logits_ab_aa, p_neg_weights1)
         loss_b = softmax_cross_entropy_with_logits(labels, logits_ba_bb, p_neg_weights2)
+        # add random alpha for loss balancing
+        # alpha = torch.rand(1).cuda()
+        # loss = alpha * loss_a + (1 - alpha) * loss_b
         loss = (loss_a + loss_b).mean()
 
         return loss
