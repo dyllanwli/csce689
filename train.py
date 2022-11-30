@@ -240,16 +240,16 @@ def main_worker(gpu, ngpus_per_node, args):
 
     # simclr augmentations
     augmentation1 = [
+        transforms.RandomHorizontalFlip(),
         transforms.RandomResizedCrop(image_size, scale=(args.crop_min, 1.)),
         transforms.RandomApply([
-            transforms.ColorJitter(0.4, 0.4, 0.2, 0.1),  # not strengthened
+            transforms.ColorJitter(0.5, 0.5, 0.5, 0.1),  # not strengthened
             # transforms.RandomRotation([-8,+8]),
             # transforms.ElasticTransform(alpha=250.0),
             # transforms.RandomPerspective(distortion_scale = 0.6, p=1.0),
         ], p=0.8),
         transforms.RandomGrayscale(p=0.2),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
+        transforms.GaussianBlur(kernel_size=9),
         transforms.ToTensor(),
         normalize
     ]
