@@ -9,7 +9,7 @@ python train.py \
   --save_dir ./saved_models/ \
   --print-freq 10 \
   --wandb 1 \
-  --accloss 10 \
+  --accloss 3 \
   --optimizer lars
 
 # optimizer option

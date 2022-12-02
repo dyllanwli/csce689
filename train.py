@@ -125,6 +125,7 @@ parser.add_argument('--wandb', default=1, type=int,
                     help='if log to wandb')
 parser.add_argument('--accloss', default=1, type=int,
                     help='accumulate loss')
+parser.add_argument('--acclosstype', default='max', type=str)
 
 def main():
     args = parser.parse_args()
@@ -330,7 +331,10 @@ def train(train_loader, model, optimizer, scaler, summary_writer, epoch, args):
         loss_list.append(loss)
         # compute gradient and do SGD step
         if i % args.accloss == 0:
-            loss = max(loss_list)
+            if args.acclosstype == "max":
+                loss = max(loss_list)
+            elif args.acclosstype == "min":
+                loss = min(loss_list)
             optimizer.zero_grad()
             scaler.scale(loss).backward()
             scaler.step(optimizer)
