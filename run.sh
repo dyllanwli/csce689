@@ -10,6 +10,7 @@ python train.py \
   --print-freq 10 \
   --wandb 1 \
   --accloss 3 \
+  --acclosstype min \
   --optimizer lars
 
 # optimizer option
