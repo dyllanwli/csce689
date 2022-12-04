@@ -25,6 +25,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as torchvision_models
 from torch.utils.tensorboard import SummaryWriter
+import wandb
 
 torchvision_model_names = sorted(name for name in torchvision_models.__dict__
     if name.islower() and not name.startswith("__")
@@ -79,9 +80,11 @@ parser.add_argument('--save_dir', default='./saved_models/', type=str)
 
 best_acc1 = 0
 
+
 def main():
     args = parser.parse_args()
 
+    wandb.init(entity="dyllanwli", project="csce689", group="lincls")
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -101,51 +104,57 @@ def main():
 
 def main_worker(gpu, ngpus_per_node, args):
     global best_acc1
-    args.gpu = gpu
 
-    if args.gpu is not None:
-        print("Use GPU: {} for training".format(args.gpu))
+    # get all pretrained models 
+    pretrained_model_list = [os.path.join(args.pretrained, x) for x in os.listdir(args.pretrained) if x.endswith('.tar')]
+    # sort tar file by from 0000 to 0400
+    pretrained_model_list = sorted(pretrained_model_list)
+    for preained_model_path in pretrained_model_list:
+        args.gpu = gpu
 
-    # create model
-    print("=> creating model '{}'".format(args.arch))
-    model = torchvision_models.__dict__[args.arch]()
-    linear_keyword = 'fc'
+        if args.gpu is not None:
+            print("Use GPU: {} for training".format(args.gpu))
 
-    if args.data_name == 'cifar10':
-         num_classes = 10
-    elif args.data_name == 'cifar100' : 
-         num_classes = 100
-    else:
-        return 
-    print ('Dataset: %s' %args.data_name)
-   
-    # NEW!
-    # remove default fc layer and add new fc layer with customized num classes
-    hidden_dim = model.fc.weight.shape[1]
-    del model.fc 
-    model.fc = nn.Linear(hidden_dim, num_classes, bias=True)
+        # create model
+        print("=> creating model '{}'".format(args.arch))
+        model = torchvision_models.__dict__[args.arch]()
+        linear_keyword = 'fc'
+
+        if args.data_name == 'cifar10':
+            num_classes = 10
+        elif args.data_name == 'cifar100' : 
+            num_classes = 100
+        else:
+            return 
+        print ('Dataset: %s' %args.data_name)
     
-    # NEW!
-    # change cifar head for resnet
-    if 'cifar' in args.data_name:
-        model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        model.maxpool = nn.Identity()
-        print ('Cifar head:', 'cifar' in args.data_name)
+        # NEW!
+        # remove default fc layer and add new fc layer with customized num classes
+        hidden_dim = model.fc.weight.shape[1]
+        del model.fc 
+        model.fc = nn.Linear(hidden_dim, num_classes, bias=True)
+        
+        # NEW!
+        # change cifar head for resnet
+        if 'cifar' in args.data_name:
+            model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+            model.maxpool = nn.Identity()
+            print ('Cifar head:', 'cifar' in args.data_name)
 
-    # freeze all layers but the last fc
-    for name, param in model.named_parameters():
-        if name not in ['%s.weight' % linear_keyword, '%s.bias' % linear_keyword]:
-            param.requires_grad = False
+        # freeze all layers but the last fc
+        for name, param in model.named_parameters():
+            if name not in ['%s.weight' % linear_keyword, '%s.bias' % linear_keyword]:
+                param.requires_grad = False
 
-    # init the fc layer
-    getattr(model, linear_keyword).weight.data.normal_(mean=0.0, std=0.01)
-    getattr(model, linear_keyword).bias.data.zero_()
+        # init the fc layer
+        getattr(model, linear_keyword).weight.data.normal_(mean=0.0, std=0.01)
+        getattr(model, linear_keyword).bias.data.zero_()
 
-    # load from pre-trained, before DistributedDataParallel constructor
-    if args.pretrained:
-        if os.path.isfile(args.pretrained):
-            print("=> loading checkpoint '{}'".format(args.pretrained))
-            checkpoint = torch.load(args.pretrained, map_location="cpu")
+        # load from pre-trained, before DistributedDataParallel constructor
+        print ('Loading pretrained model from %s' %preained_model_path)
+        if os.path.isfile(preained_model_path):
+            print("=> loading checkpoint '{}'".format(preained_model_path))
+            checkpoint = torch.load(preained_model_path, map_location="cpu")
 
             # rename moco pre-trained keys
             state_dict = checkpoint['state_dict']
@@ -161,157 +170,160 @@ def main_worker(gpu, ngpus_per_node, args):
             msg = model.load_state_dict(state_dict, strict=False)
             assert set(msg.missing_keys) == {"%s.weight" % linear_keyword, "%s.bias" % linear_keyword}
 
-            print("=> loaded pre-trained model '{}'".format(args.pretrained))
+            print("=> loaded pre-trained model '{}'".format(preained_model_path))
         else:
-            print("=> no checkpoint found at '{}'".format(args.pretrained))
+            print("=> no checkpoint found at '{}'".format(preained_model_path))
 
-    # infer learning rate before changing batch size
-    init_lr = args.lr * args.batch_size / 256
+        # infer learning rate before changing batch size
+        init_lr = args.lr * args.batch_size / 256
 
-    if not torch.cuda.is_available():
-        print('using CPU, this will be slow')
-    elif args.gpu is not None:
-        torch.cuda.set_device(args.gpu)
-        model = model.cuda(args.gpu)
-    else:
-        # DataParallel will divide and allocate batch_size to all available GPUs
-        if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
-            model.features = torch.nn.DataParallel(model.features)
-            model.cuda()
+        if not torch.cuda.is_available():
+            print('using CPU, this will be slow')
+        elif args.gpu is not None:
+            torch.cuda.set_device(args.gpu)
+            model = model.cuda(args.gpu)
         else:
-            model = torch.nn.DataParallel(model).cuda()
-
-    # define loss function (criterion) and optimizer
-    criterion = nn.CrossEntropyLoss().cuda(args.gpu)
-
-    # optimize only the linear classifier
-    parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-    assert len(parameters) == 2  # weight, bias
-
-    optimizer = torch.optim.SGD(parameters, init_lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
-
-    
-    # NEW!
-    # save log
-    save_root_path = args.save_dir 
-    fold_name = args.pretrained.split('/')[-2]
-    logdir = 'linear_eval_%s'%(fold_name) 
-    summary_writer = SummaryWriter(log_dir=os.path.join(save_root_path, logdir))
-    print (logdir)
-
-    # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            if args.gpu is None:
-                checkpoint = torch.load(args.resume)
+            # DataParallel will divide and allocate batch_size to all available GPUs
+            if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
+                model.features = torch.nn.DataParallel(model.features)
+                model.cuda()
             else:
-                # Map model to be loaded to specified single gpu.
-                loc = 'cuda:{}'.format(args.gpu)
-                checkpoint = torch.load(args.resume, map_location=loc)
-            args.start_epoch = checkpoint['epoch']
-            best_acc1 = checkpoint['best_acc1']
-            if args.gpu is not None:
-                # best_acc1 may be from a checkpoint from a different GPU
-                best_acc1 = best_acc1.to(args.gpu)
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+                model = torch.nn.DataParallel(model).cuda()
 
-    cudnn.benchmark = True
+        # define loss function (criterion) and optimizer
+        criterion = nn.CrossEntropyLoss().cuda(args.gpu)
 
+        # optimize only the linear classifier
+        parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        assert len(parameters) == 2  # weight, bias
 
-    # Data loading code
-    mean = {'cifar10':      [0.4914, 0.4822, 0.4465],
-            'cifar100':     [0.4914, 0.4822, 0.4465] 
-            }[args.data_name]
-    std = {'cifar10':      [0.2470, 0.2435, 0.2616],
-            'cifar100':     [0.2470, 0.2435, 0.2616]
-            }[args.data_name]
-
-
-    image_size = {'cifar10':32, 'cifar100':32}[args.data_name]
-    normalize = transforms.Normalize(mean=mean, std=std)
-    
-    if args.data_name == 'cifar10':
-        DATA_ROOT = args.data
-        train_dataset = datasets.CIFAR10(root=DATA_ROOT, train=True, download=True, transform=transforms.Compose([
-                                                                                            transforms.RandomResizedCrop(32),
-                                                                                            transforms.RandomHorizontalFlip(),
-                                                                                            transforms.ToTensor(),
-                                                                                            normalize,]))
-    elif args.data_name == 'cifar100':
-        DATA_ROOT = args.data
-        train_dataset = datasets.CIFAR100(root=DATA_ROOT, train=True, download=True, transform=transforms.Compose([
-                                                                                            transforms.RandomResizedCrop(32),
-                                                                                            transforms.RandomHorizontalFlip(),
-                                                                                            transforms.ToTensor(),
-                                                                                            normalize,]))
-    else:
-        raise ValueError
+        optimizer = torch.optim.SGD(parameters, init_lr,
+                                    momentum=args.momentum,
+                                    weight_decay=args.weight_decay)
 
         
-    train_sampler = None
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+        # NEW!
+        # save log
+        save_root_path = args.save_dir 
+        fold_name = args.pretrained.split('/')[-2]
+        logdir = 'linear_eval_%s'%(fold_name) 
+        summary_writer = SummaryWriter(log_dir=os.path.join(save_root_path, logdir))
+        print (logdir)
 
-    # validation 
-    if args.data_name == 'cifar10':
+        # optionally resume from a checkpoint
+        if args.resume:
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                if args.gpu is None:
+                    checkpoint = torch.load(args.resume)
+                else:
+                    # Map model to be loaded to specified single gpu.
+                    loc = 'cuda:{}'.format(args.gpu)
+                    checkpoint = torch.load(args.resume, map_location=loc)
+                args.start_epoch = checkpoint['epoch']
+                best_acc1 = checkpoint['best_acc1']
+                if args.gpu is not None:
+                    # best_acc1 may be from a checkpoint from a different GPU
+                    best_acc1 = best_acc1.to(args.gpu)
+                model.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.resume, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
+
+        cudnn.benchmark = True
+
+
+        # Data loading code
+        mean = {'cifar10':      [0.4914, 0.4822, 0.4465],
+                'cifar100':     [0.4914, 0.4822, 0.4465] 
+                }[args.data_name]
+        std = {'cifar10':      [0.2470, 0.2435, 0.2616],
+                'cifar100':     [0.2470, 0.2435, 0.2616]
+                }[args.data_name]
+
+
+        image_size = {'cifar10':32, 'cifar100':32}[args.data_name]
+        normalize = transforms.Normalize(mean=mean, std=std)
+        
+        if args.data_name == 'cifar10':
             DATA_ROOT = args.data
-            val_dataset = datasets.CIFAR10(root=DATA_ROOT, train=False, download=True, transform=transforms.Compose([
-                                                                                            transforms.ToTensor(),
-                                                                                            normalize,]))
-            val_loader = torch.utils.data.DataLoader(
-                val_dataset, batch_size=1024, shuffle=False,
-                num_workers=args.workers, pin_memory=True)
-
-    elif args.data_name == 'cifar100':
+            train_dataset = datasets.CIFAR10(root=DATA_ROOT, train=True, download=True, transform=transforms.Compose([
+                                                                                                transforms.RandomResizedCrop(32),
+                                                                                                transforms.RandomHorizontalFlip(),
+                                                                                                transforms.ToTensor(),
+                                                                                                normalize,]))
+        elif args.data_name == 'cifar100':
             DATA_ROOT = args.data
-            val_dataset = datasets.CIFAR100(root=DATA_ROOT, train=False, download=True, transform=transforms.Compose([
-                                                                                            transforms.ToTensor(),
-                                                                                            normalize,]))
-            val_loader = torch.utils.data.DataLoader(
-                val_dataset, batch_size=1024, shuffle=False,
-                num_workers=args.workers, pin_memory=True)
-    else:
-        raise ValueError
+            train_dataset = datasets.CIFAR100(root=DATA_ROOT, train=True, download=True, transform=transforms.Compose([
+                                                                                                transforms.RandomResizedCrop(32),
+                                                                                                transforms.RandomHorizontalFlip(),
+                                                                                                transforms.ToTensor(),
+                                                                                                normalize,]))
+        else:
+            raise ValueError
+
+            
+        train_sampler = None
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+            num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+
+        # validation 
+        if args.data_name == 'cifar10':
+                DATA_ROOT = args.data
+                val_dataset = datasets.CIFAR10(root=DATA_ROOT, train=False, download=True, transform=transforms.Compose([
+                                                                                                transforms.ToTensor(),
+                                                                                                normalize,]))
+                val_loader = torch.utils.data.DataLoader(
+                    val_dataset, batch_size=1024, shuffle=False,
+                    num_workers=args.workers, pin_memory=True)
+
+        elif args.data_name == 'cifar100':
+                DATA_ROOT = args.data
+                val_dataset = datasets.CIFAR100(root=DATA_ROOT, train=False, download=True, transform=transforms.Compose([
+                                                                                                transforms.ToTensor(),
+                                                                                                normalize,]))
+                val_loader = torch.utils.data.DataLoader(
+                    val_dataset, batch_size=1024, shuffle=False,
+                    num_workers=args.workers, pin_memory=True)
+        else:
+            raise ValueError
 
 
-    if args.evaluate:
-        validate(val_loader, model, criterion, args)
-        return
+        if args.evaluate:
+            validate(val_loader, model, criterion, args)
+            return
 
-    for epoch in range(args.start_epoch, args.epochs):
-   
-        adjust_learning_rate(optimizer, init_lr, epoch, args)
+        for epoch in range(args.start_epoch, args.epochs):
+    
+            adjust_learning_rate(optimizer, init_lr, epoch, args)
 
-        # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, args)
+            # train for one epoch
+            train(train_loader, model, criterion, optimizer, epoch, args)
 
-        # evaluate on validation set
-        acc1 = validate(val_loader, model, criterion, args)
+            # evaluate on validation set
+            acc1 = validate(val_loader, model, criterion, args)
 
-        # remember best acc@1 and save checkpoint
-        is_best = acc1 > best_acc1
-        best_acc1 = max(acc1, best_acc1)
-        print (' * Best Acc@1:%.3f'%best_acc1)
+            # remember best acc@1 and save checkpoint
+            is_best = acc1 > best_acc1
+            best_acc1 = max(acc1, best_acc1)
+            print (' * Best Acc@1:%.3f'%best_acc1)
+            
 
 
-        save_checkpoint({
-                'epoch': epoch + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'best_acc1': best_acc1,
-                'optimizer' : optimizer.state_dict(),
-            }, is_best, filename=os.path.join(save_root_path, logdir, 'checkpoint.pth.tar'), save_path=os.path.join(save_root_path, logdir))
-        #if epoch == args.start_epoch:
-        #   sanity_check(model.state_dict(), args.pretrained, linear_keyword)
+            save_checkpoint({
+                    'epoch': epoch + 1,
+                    'arch': args.arch,
+                    'state_dict': model.state_dict(),
+                    'best_acc1': best_acc1,
+                    'optimizer' : optimizer.state_dict(),
+                }, is_best, filename=os.path.join(save_root_path, logdir, 'checkpoint.pth.tar'), save_path=os.path.join(save_root_path, logdir))
+            #if epoch == args.start_epoch:
+            #   sanity_check(model.state_dict(), args.pretrained, linear_keyword)
+        print("logging the best_acc1 for each model")
+        wandb.log({'best_acc1': best_acc1})
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
@@ -364,6 +376,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         end = time.time()
 
         if i % args.print_freq == 0:
+            wandb.init()
             progress.display(i)
 
 
