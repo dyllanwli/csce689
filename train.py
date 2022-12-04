@@ -121,7 +121,7 @@ parser.add_argument('--learning-rate-scaling', default='linear', type=str,
                     help='learing rate scaling (default: linear)')
 
 # others
-parser.add_argument('--wandb', default=1, type=int,
+parser.add_argument('--wandb', default=0, type=int,
                     help='if log to wandb')
 parser.add_argument('--accloss', default=1, type=int,
                     help='accumulate loss')
@@ -328,13 +328,16 @@ def train(train_loader, model, optimizer, scaler, summary_writer, epoch, args):
 
         summary_writer.add_scalar("loss", loss.item(), epoch * iters_per_epoch + i)
         # loss *= 1./ args.accloss
-        loss_list.append(loss)
+        if args.acclosstype != "none":
+            loss_list.append(loss)
         # compute gradient and do SGD step
         if i % args.accloss == 0:
             if args.acclosstype == "max":
                 loss = max(loss_list)
             elif args.acclosstype == "min":
                 loss = min(loss_list)
+            else:
+                pass
             optimizer.zero_grad()
             scaler.scale(loss).backward()
             scaler.step(optimizer)

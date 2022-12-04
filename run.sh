@@ -6,11 +6,11 @@ python train.py \
   --workers 32 \
   --wd=1e-4 \
   --data_name cifar10 \
-  --save_dir ./saved_models/ \
+  --save_dir ./saved_models4/ \
   --print-freq 10 \
   --wandb 1 \
-  --accloss 3 \
-  --acclosstype min \
+  --accloss 1 \
+  --acclosstype none \
   --optimizer lars
 
 # optimizer option
