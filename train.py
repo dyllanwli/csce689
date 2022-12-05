@@ -241,16 +241,15 @@ def main_worker(gpu, ngpus_per_node, args):
 
     # simclr augmentations
     augmentation1 = [
-        transforms.RandomHorizontalFlip(),
+        transforms.RandomGrayscale(p=0.2),
         transforms.RandomResizedCrop(image_size, scale=(args.crop_min, 1.)),
         transforms.RandomApply([
-            transforms.ColorJitter(0.5, 0.5, 0.5, 0.1),  # not strengthened
+            transforms.ColorJitter(0.4, 0.4, 0.2, 0.1),  # not strengthened
             # transforms.RandomRotation([-8,+8]),
             # transforms.ElasticTransform(alpha=250.0),
             # transforms.RandomPerspective(distortion_scale = 0.6, p=1.0),
         ], p=0.8),
-        transforms.RandomGrayscale(p=0.2),
-        transforms.GaussianBlur(kernel_size=9),
+        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         normalize
     ]
@@ -322,13 +321,13 @@ def train(train_loader, model, optimizer, scaler, summary_writer, epoch, args):
 
         # compute output
         with torch.cuda.amp.autocast(True):
-            loss = model(images[0], images[1], index, args.gamma)
+            loss = model(images[0], images[1], index, args.gamma, i, epoch)
 
         losses.update(loss.item(), images[0].size(0))
 
         summary_writer.add_scalar("loss", loss.item(), epoch * iters_per_epoch + i)
         # loss *= 1./ args.accloss
-        if args.acclosstype != "none":
+        if args.acclosstype != "None":
             loss_list.append(loss)
         # compute gradient and do SGD step
         if i % args.accloss == 0:
@@ -348,7 +347,7 @@ def train(train_loader, model, optimizer, scaler, summary_writer, epoch, args):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
+        if i % args.print_freq == 0 and loss.item() <= 1:
             progress.display(i)
             wandb.log({
                 "batch_time_avg": batch_time.avg,

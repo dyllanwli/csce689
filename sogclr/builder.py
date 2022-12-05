@@ -73,7 +73,7 @@ class SimCLR(nn.Module):
 
         return nn.Sequential(*mlp)
 
-    def dynamic_contrastive_loss(self, hidden1, hidden2, index=None, gamma=0.99, distributed=True):
+    def dynamic_contrastive_loss(self, hidden1, hidden2, index=None, gamma=0.99, distributed=True, i = None, epoch = None):
         # Get (normalized) hidden1 and hidden2.
         hidden1, hidden2 = F.normalize(hidden1, p=2, dim=1), F.normalize(hidden2, p=2, dim=1)
         batch_size = hidden1.shape[0]
@@ -98,9 +98,13 @@ class SimCLR(nn.Module):
         neg_logits1 = torch.exp(logits_ab_aa/self.T)*neg_mask   #(B, 2B)
         neg_logits2 = torch.exp(logits_ba_bb/self.T)*neg_mask
 
-        u1 = (1 - gamma) * self.u[index].cuda() + gamma * torch.sum(neg_logits1, dim=1, keepdim=True)/(2*(batch_size-1))
-        u2 = (1 - gamma) * self.u[index].cuda() + gamma * torch.sum(neg_logits2, dim=1, keepdim=True)/(2*(batch_size-1))
-        
+        total_iter = i + epoch * 782 # batch_size number
+        gammad = 1 / torch.sqrt(torch.tensor(total_iter + 9)).cuda()
+
+        #print(index)
+        u1 = (1 - gamma - gammad) * self.u[index].cuda() + (gamma + gammad)  * torch.sum(neg_logits1, dim=1, keepdim=True)/(2*(batch_size-1))
+        u2 = (1 - gamma - gammad) * self.u[index].cuda() + (gamma + gammad)  * torch.sum(neg_logits2, dim=1, keepdim=True)/(2*(batch_size-1))
+        #print(u1.shape)
         self.u[index] = u1.detach().cpu()+ u2.detach().cpu()
 
         p_neg_weights1 = (neg_logits1/u1).detach()
@@ -151,13 +155,13 @@ class SimCLR(nn.Module):
         loss = (loss_a + loss_b).mean()
         return loss
     
-    def forward(self, x1, x2, index, gamma):
+    def forward(self, x1, x2, index, gamma, i, epoch):
         # compute features
         h1 = self.base_encoder(x1)
         h2 = self.base_encoder(x2)
 
         if self.loss_type == 'dcl':
-           loss = self.dynamic_contrastive_loss(h1, h2, index, gamma) 
+           loss = self.dynamic_contrastive_loss(h1, h2, index, gamma, i=i, epoch=epoch)
         elif self.loss_type == 'cl':   
            loss = self.contrastive_loss(h1, h2)
         return loss
