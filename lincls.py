@@ -328,6 +328,9 @@ def main_worker(gpu, ngpus_per_node, args):
             print("logging the best_acc1 for each model in each epoch")
             wandb.log({'best_acc1': best_acc1})
 
+        if len(pretrained_model_list) > 1:
+            wandb.log({'best_acc1_per_ckp': best_acc1})
+
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
     batch_time = AverageMeter('Time', ':6.3f')
