@@ -106,9 +106,12 @@ def main_worker(gpu, ngpus_per_node, args):
     global best_acc1
 
     # get all pretrained models 
-    pretrained_model_list = [os.path.join(args.pretrained, x) for x in os.listdir(args.pretrained) if x.endswith('.tar')]
-    # sort tar file by from 0000 to 0400
-    pretrained_model_list = sorted(pretrained_model_list)
+    if args.pretrained.endswith('.tar'):
+        pretrained_model_list = [args.pretrained]
+    else:
+        pretrained_model_list = [os.path.join(args.pretrained, x) for x in os.listdir(args.pretrained) if x.endswith('.tar')]
+        # sort tar file by from 0000 to 0400
+        pretrained_model_list = sorted(pretrained_model_list)
     for preained_model_path in pretrained_model_list:
         args.gpu = gpu
 
@@ -322,8 +325,8 @@ def main_worker(gpu, ngpus_per_node, args):
                 }, is_best, filename=os.path.join(save_root_path, logdir, 'checkpoint.pth.tar'), save_path=os.path.join(save_root_path, logdir))
             #if epoch == args.start_epoch:
             #   sanity_check(model.state_dict(), args.pretrained, linear_keyword)
-        print("logging the best_acc1 for each model")
-        wandb.log({'best_acc1': best_acc1})
+            print("logging the best_acc1 for each model in each epoch")
+            wandb.log({'best_acc1': best_acc1})
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
