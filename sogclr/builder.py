@@ -99,7 +99,8 @@ class SimCLR(nn.Module):
         neg_logits2 = torch.exp(logits_ba_bb/self.T)*neg_mask
 
         total_iter = i + epoch * 782 # batch_size number
-        gammad = 1 / torch.sqrt(torch.tensor(total_iter + 9)).cuda()
+        # gammad = 1 / torch.sqrt(torch.tensor(total_iter + 9)).cuda()
+        gammad = 1 / (total_iter + 3)
 
         #print(index)
         u1 = (1 - gamma - gammad) * self.u[index].cuda() + (gamma + gammad)  * torch.sum(neg_logits1, dim=1, keepdim=True)/(2*(batch_size-1))
